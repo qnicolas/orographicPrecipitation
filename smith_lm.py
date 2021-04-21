@@ -10,6 +10,7 @@ if p not in sys.path:
     sys.path.append(p)
 from orographicPrecipitation.precip_extremes_scaling import saturation_thermodynamics, moist_adiabatic_lapse_rate, pars
 from orographicPrecipitation.precip_model_functions import retrieve_era5_pl,retrieve_era5_sfc
+from tools.e5tools import e5_monthly_file
 
 
 EPS = np.finfo(float).eps
@@ -17,19 +18,21 @@ orog1 = xr.open_dataset("/global/cfs/projectdirs/m3522/cmip6/ERA5/e5.oper.invari
 orog=orog1.Z/9.80665
 m_per_degreelat = 6370*1e3*np.pi/180
 orog_precise=xr.open_dataset("/global/cscratch1/sd/qnicolas/precipmodel/GMTED2010_15n015_00625deg.nc").elevation
-
+orog_precise=orog_precise.assign_coords({'latitude':np.arange(-90.+0.0625/2,90.,0.0625)*orog_precise.nlat**0,'longitude':np.arange(-180.,180.,0.0625)*orog_precise.nlon**0}).swap_dims({'nlat':'latitude','nlon':'longitude'})
+orog_precise.coords['longitude'] = orog_precise.coords['longitude'] % 360 
+orog_precise = orog_precise.reindex(latitude=list(reversed(orog_precise.latitude))).sortby(orog_precise.longitude)
 timedisc = 6 #take data every 6 hours
 
 
 
 def retrieve_era5_monthly(month,lonlat,varid):
-    path = "/global/project/projectdirs/m3310/wboos/era5monthly/"
-    era5var = xr.open_dataset(glob.glob(path+"*/e5.mnth.mean.an.*.%s.*.%s*.nc"%(varid,month[:4]))[0])
+    path = "/global/project/projectdirs/m3310/wboos/era5monthlyQuentin/"
+    era5var = xr.open_dataset(e5_monthly_file(varid,month[:4]))
     varname = list(era5var.data_vars)[0] #get name of the main variable, eg 'W' for omega
     era5var1 = era5var[varname].sel(time=pd.to_datetime(month,format='%Y%m')).sel(longitude=slice(lonlat[0],lonlat[1]),latitude=slice(lonlat[3],lonlat[2]))
     return era5var1
 
-def full_linear_model_saturated_monthly(month,lonlat,fine_scale=False,lr_param=0.99):
+def full_linear_model_saturated_monthly(month,lonlat,fine_scale=False,lr_param=0.99,p0=0.):
     """compute total precip in a box given by lonlat, for a given month
         with Smith's linear model
         
@@ -43,9 +46,11 @@ def full_linear_model_saturated_monthly(month,lonlat,fine_scale=False,lr_param=0
     #Start by retriving surface temperature, pressure, and 900 hpa winds
     temp_surface = np.array([retrieve_era5_monthly(month,lonlat2,'128_167_2t').mean(["latitude","longitude"])])
     ps =           np.array([retrieve_era5_monthly(month,lonlat2,'128_134_sp').mean(["latitude","longitude"])])
-    u900 = np.array([retrieve_era5_monthly(month,lonlat2,'128_131_u').sel(level=900.).mean(["latitude","longitude"])])
-    v900 = np.array([retrieve_era5_monthly(month,lonlat2,'128_132_v').sel(level=900.).mean(["latitude","longitude"])])
-    
+    #u900 = np.array([retrieve_era5_monthly(month,lonlat2,'128_131_u').sel(level=900.).mean(["latitude","longitude"])])
+    #v900 = np.array([retrieve_era5_monthly(month,lonlat2,'128_132_v').sel(level=900.).mean(["latitude","longitude"])])
+    u900 = np.array([retrieve_era5_monthly(month,lonlat2,'*_10u').mean(["latitude","longitude"])])
+    v900 = np.array([retrieve_era5_monthly(month,lonlat2,'*_10v').mean(["latitude","longitude"])])
+        
     #compute elevation and dx, dy
     if fine_scale :
         elevation = orog_precise.sel(longitude=slice(lonlat2[0],lonlat2[1]),latitude=slice(lonlat2[3],lonlat2[2]))
@@ -55,7 +60,7 @@ def full_linear_model_saturated_monthly(month,lonlat,fine_scale=False,lr_param=0
     dx = coslat*m_per_degreelat*np.abs(np.array(elevation.latitude[1]-elevation.latitude[0]))
     dy = m_per_degreelat*np.abs(np.array(elevation.longitude[1]-elevation.longitude[0]))
 
-    pr = linear_model_saturated(temp_surface,ps,u900,v900,(lonlat[2]+lonlat[3])/2.,elevation,dx,dy,lr_param)
+    pr = linear_model_saturated(temp_surface,ps,u900,v900,(lonlat[2]+lonlat[3])/2.,elevation,dx,dy,lr_param,p0)
     return pr.sel(longitude=slice(lonlat[0],lonlat[1]),latitude=slice(lonlat[3],lonlat[2]))
 
 
@@ -103,7 +108,7 @@ def HwCw(temp_surface,ps,gamma):
     Cw = es/(pars('gas_constant')*temp_surface)*gamma_m/gamma
     return Hw,Cw
 
-def linear_model_saturated(temp_surface,ps,u900,v900,latitude,elevation,dx,dy,lr_param=0.99):
+def linear_model_saturated(temp_surface,ps,u900,v900,latitude,elevation,dx,dy,lr_param=0.99,p0=0.):
     """Compute orographic precipitation using the Linear Model, assuming a lapse rate = 0.99*moist adiabatic lapse rate
      - temp_surface = surface temperature [K] (np.array)
      - ps = surface pressure [Pa] (np.array)
@@ -117,7 +122,7 @@ def linear_model_saturated(temp_surface,ps,u900,v900,latitude,elevation,dx,dy,lr
     gamma = lr_param*gamma_m
     Hw,Cw = HwCw(temp_surface,ps,gamma)
     param = {"latitude":latitude,
-              "p0":0., #assume no background precip rate
+              "p0":p0,
               "windspeed":np.sqrt(u900[0]**2+v900[0]**2),
               "winddir":np.mod(270 - np.angle(u900[0]+v900[0]*1j,deg=True),360),
               "tau_c":2000.,
