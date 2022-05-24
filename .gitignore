@@ -1,5 +1,8 @@
 **/.ipynb_checkpoints
+**/dask-worker-space
 **/__pycache__
 *.mp4
+*.png
 *.nc
 wrfProcessing/old/*
+wrfProcessing/MDTFdiagnostics/

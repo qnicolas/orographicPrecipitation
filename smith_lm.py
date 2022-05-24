@@ -13,15 +13,15 @@ from orographicPrecipitation.precip_model_functions import retrieve_era5_pl,retr
 from tools.e5tools import e5_monthly_file
 
 
-EPS = np.finfo(float).eps
-orog1 = xr.open_dataset("/global/cfs/projectdirs/m3522/cmip6/ERA5/e5.oper.invariant/197901/e5.oper.invariant.128_129_z.ll025sc.1979010100_1979010100.nc")
-orog=orog1.Z/9.80665
-m_per_degreelat = 6370*1e3*np.pi/180
-orog_precise=xr.open_dataset("/global/cscratch1/sd/qnicolas/precipmodel/GMTED2010_15n015_00625deg.nc").elevation
-orog_precise=orog_precise.assign_coords({'latitude':np.arange(-90.+0.0625/2,90.,0.0625)*orog_precise.nlat**0,'longitude':np.arange(-180.,180.,0.0625)*orog_precise.nlon**0}).swap_dims({'nlat':'latitude','nlon':'longitude'})
-orog_precise.coords['longitude'] = orog_precise.coords['longitude'] % 360 
-orog_precise = orog_precise.reindex(latitude=list(reversed(orog_precise.latitude))).sortby(orog_precise.longitude)
-timedisc = 6 #take data every 6 hours
+#EPS = np.finfo(float).eps
+#orog1 = xr.open_dataset("/global/cfs/projectdirs/m3522/cmip6/ERA5/e5.oper.invariant/197901/e5.oper.invariant.128_129_z.ll025sc.1979010100_1979010100.nc")
+#orog=orog1.Z/9.80665
+#m_per_degreelat = 6370*1e3*np.pi/180
+#orog_precise=xr.open_dataset("/global/cscratch1/sd/qnicolas/precipmodel/GMTED2010_15n015_00625deg.nc").elevation
+#orog_precise=orog_precise.assign_coords({'latitude':np.arange(-90.+0.0625/2,90.,0.0625)*orog_precise.nlat**0,'longitude':np.arange(-180.,180.,0.0625)*orog_precise.nlon**0}).swap_dims({'nlat':'latitude','nlon':'longitude'})
+#orog_precise.coords['longitude'] = orog_precise.coords['longitude'] % 360 
+#orog_precise = orog_precise.reindex(latitude=list(reversed(orog_precise.latitude))).sortby(orog_precise.longitude)
+#timedisc = 6 #take data every 6 hours
 
 
 
