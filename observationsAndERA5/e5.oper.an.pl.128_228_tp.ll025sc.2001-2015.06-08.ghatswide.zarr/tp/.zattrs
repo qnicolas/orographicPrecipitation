@@ -1,0 +1,12 @@
+{
+    "_ARRAY_DIMENSIONS": [
+        "time",
+        "latitude",
+        "longitude"
+    ],
+    "add_offset": 0.03923165536422698,
+    "long_name": "Total precipitation",
+    "missing_value": -32767,
+    "scale_factor": 1.1973281866638277e-06,
+    "units": "m"
+}
