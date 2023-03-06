@@ -88,24 +88,24 @@ class MountainRange :
         self.vars_rot['uperp'] = crossslopeflow(self.vars_rot['VAR_100U'], self.vars_rot['VAR_100V'],self.angle)
 
     def set_3dvar(self,varname,storage_name):
-        stored_file=self.path+'e5.monthly.%s.%s.2001-2018.nc'%(storage_name,self.name)
+        stored_file=self.path+'e5.monthly.%s.%s.2001-2020.nc'%(storage_name,self.name)
         if os.path.isfile(stored_file):
             self.vars[varname] = sel_months(xr.open_dataarray(stored_file).groupby('time.month').mean(),self.months).mean('month')
         else :
             print("Computing %s ..."%varname)
-            monthlyvar = e5_monthly_timeseries(storage_name,years=range(2001,2019),box=self.box)
-            self.vars[varname] = sel_box(monthlyvar.groupby('time.month').mean(),self.months).mean('month')
+            monthlyvar = e5_monthly_timeseries(storage_name,years=range(2001,2021),box=self.box)
+            self.vars[varname] = sel_months(monthlyvar.groupby('time.month').mean(),self.months).mean('month')
             monthlyvar.to_netcdf(stored_file)
             print("Done ! and stored in %s"%self.path)
         self.vars_rot[varname] = rotate_var(self.vars[varname],self.angle,self.x_mountaintop,two_dim=False)
         
     def set_4dvar(self,varname,storage_name):
-        stored_file=self.path+'e5.monthly.%s.%s.2001-2018.nc'%(storage_name,self.name)
+        stored_file=self.path+'e5.monthly.%s.%s.2001-2020.nc'%(storage_name,self.name)
         if os.path.isfile(stored_file):
             self.vars[varname] = xr.open_dataarray(stored_file)
         else :
             print("Computing %s ..."%varname)
-            self.vars[varname] = e5_monthly_timeseries(storage_name,years=range(2001,2019),box=self.box)
+            self.vars[varname] = e5_monthly_timeseries(storage_name,years=range(2001,2021),box=self.box)
             self.vars[varname].to_netcdf(stored_file)
             print("Done ! and stored in %s"%self.path)
         self.vars_rot[varname] = rotate_var(self.vars[varname],self.angle,self.x_mountaintop,two_dim=False)
@@ -185,7 +185,7 @@ def tilted_rect(grid,x1,y1,x2,y2,width,reverse=False):
     sc_prod = (x-x1)*(x2-x1)+(y-y1)*(y2-y1)
     halfplane_perp_up = sc_prod >= 0
     halfplane_perp_dn = (x-x2)*(x1-x2)+(y-y2)*(y1-y2) >= 0
-    distance_across = np.sqrt((x-x1)**2+(y-y1)**2 - sc_prod**2/((x2-x1)**2+(y2-y1)**2))
+    distance_across = np.sqrt(np.maximum(0.,(x-x1)**2+(y-y1)**2 - sc_prod**2/((x2-x1)**2+(y2-y1)**2)))
     return (halfplane_para*halfplane_perp_up*halfplane_perp_dn*(distance_across<width)).transpose('latitude','longitude')
 
 def BL_plevs(t,q,lft_top_pressure,pname='level',fixed_thetaeb=False):
@@ -274,9 +274,8 @@ def BLsimple_plevs_vectorized(t,q,kind='shallow',pname='level',fixed_thetaeb=Fal
 
 ###################### SECOND PART ########################
 
-def compute_BL(thetaeB,thetaeL,thetaeLstar):
+def compute_BL(thetaeB,thetaeL,thetaeLstar,wB=0.52):
     g=9.81
-    wB = 0.52
     wL = 1-wB
     thetae0 = 340
     capeL   = (thetaeB/thetaeLstar - 1)*thetae0
@@ -295,6 +294,9 @@ def compute_BLsimple(eb,eL,eLstar,kind='shallow'):
     elif kind=='deep':
         Pib = 0.97
         PiL = 0.88
+    elif kind=='semi':
+        Pib = 0.985
+        PiL = 0.91
     BLsimple = g/eLstar*PiL*(wB*eb/Pib+(wL*eL-eLstar)/PiL)
     return BLsimple
 
@@ -332,49 +334,71 @@ class MountainRangeCustom(MountainRange):
     def set_daily_Bl_vars(self,kind='shallow'):
         if kind=='shallow':
             suffix=''
+            wB = 0.55
         elif kind=='deep':
             suffix='deep'
-        filepaths = [self.path+"e5.diagnostic.{}{}.{}-{}.{}.{}.nc".format(varcode,suffix,self.years[0],self.years[-1],self._monthstr,self.name) for varcode in ("thetaeb","thetaeL","thetaeLstar")]
+            wB = 0.52
+        elif kind=='semi':
+            suffix='semi'
+            wB=0.52
+        filepaths = [self.path+"e5.diagnostic.{}{}.{}-{}.{}.{}.nc".format(varcode,suffix,self.years[0],self.years[-1],self._monthstr,self.name) for varcode in ("thetaeb", "thetaeL", "thetaeLstar", "tL", "qL")]
         thetaeb = xr.open_dataarray(filepaths[0])
         thetaeL = xr.open_dataarray(filepaths[1])
         thetaeLstar = xr.open_dataarray(filepaths[2])
-        self.vars['THETAEB{}_DAILY'.format(suffix.upper())] = thetaeb
-        self.vars['THETAEL{}_DAILY'.format(suffix.upper())] = thetaeL
-        self.vars['THETAELSTAR{}_DAILY'.format(suffix.upper())] = thetaeLstar
-        BL = compute_BL(thetaeb,thetaeL,thetaeLstar)
-        self.vars['BL{}_DAILY'.format(suffix.upper())] = BL
-        
-    def set_daily_Blsimple_vars(self,kind='shallow'):
-        if kind=='shallow':
-            suffix=''
-        elif kind=='deep':
-            suffix='deep'
-        filepaths = [self.path+"e5.diagnostic.{}{}.{}-{}.{}.{}.nc".format(varcode,suffix,self.years[0],self.years[-1],self._monthstr,self.name) for varcode in ("eb","eL","eLstar","tL","qL")]
-        eb = xr.open_dataarray(filepaths[0]).mean('level')
-        eL = xr.open_dataarray(filepaths[1]).mean('level')
-        eLstar = xr.open_dataarray(filepaths[2]).mean('level')
         tL = xr.open_dataarray(filepaths[3])
         qL = xr.open_dataarray(filepaths[4])
-        self.vars['EB{}_DAILY'.format(suffix.upper())] = eb
-        self.vars['EL{}_DAILY'.format(suffix.upper())] = eL
-        self.vars['ELSTAR{}_DAILY'.format(suffix.upper())] = eLstar
+        self.vars['THETAEB{}_DAILY'.format(suffix.upper())] = thetaeb
         self.vars['TL{}_DAILY'.format(suffix.upper())] = tL
         self.vars['QL{}_DAILY'.format(suffix.upper())] = qL
-        BLsimple = compute_BLsimple(eb,eL,eLstar,kind=kind)
-        self.vars['BL{}SIMPLE_DAILY'.format(suffix.upper())] = BLsimple
+        BL = compute_BL(thetaeb,thetaeL,thetaeLstar,wB)
+        self.vars['BL{}_DAILY'.format(suffix.upper())] = BL
         
-    def set_daily_uLvL(self, extra_levels=[]):
-        filepaths = [self.path+"e5.diagnostic.{}.{}-{}.{}.{}.nc".format(varcode,self.years[0],self.years[-1],self._monthstr,self.name) for varcode in ("uL","vL")]
-        uL = xr.open_dataarray(filepaths[0])
-        vL = xr.open_dataarray(filepaths[1])
-        self.vars['UL_DAILY'] = uL
-        self.vars['VL_DAILY'] = vL
-        for suffix in extra_levels:
-            filepaths = [self.path+"e5.diagnostic.{}.{}-{}.{}.{}.nc".format(varcode,self.years[0],self.years[-1],self._monthstr,self.name) for varcode in ("u"+suffix,"v"+suffix)]
-            u = xr.open_dataarray(filepaths[0])
-            v = xr.open_dataarray(filepaths[1])
-            self.vars['U{}_DAILY'.format(suffix)] = u
-            self.vars['V{}_DAILY'.format(suffix)] = v
+    def set_daily_DBl_vars(self):
+        suffix='semi'
+        wB=0.52
+        filepaths = [self.path+"e5.diagnostic.{}{}.{}-{}.{}.{}.nc".format(varcode,'dbl',self.years[0],self.years[-1],self._monthstr,self.name) for varcode in ("thetaeb", "thetaeL", "thetaeLstar", "tL", "qL")]
+        thetaeb = xr.open_dataarray(filepaths[0])
+        thetaeL = xr.open_dataarray(filepaths[1])
+        thetaeLstar = xr.open_dataarray(filepaths[2])
+        tL = xr.open_dataarray(filepaths[3])
+        qL = xr.open_dataarray(filepaths[4])
+        self.vars['THETAEB{}_DAILY'.format(suffix.upper())] = thetaeb
+        self.vars['TL{}_DAILY'.format(suffix.upper())] = tL
+        self.vars['QL{}_DAILY'.format(suffix.upper())] = qL
+        BL = compute_BL(thetaeb,thetaeL,thetaeLstar,wB)
+        self.vars['BL{}_DAILY'.format(suffix.upper())] = BL
+                
+#    def set_daily_Blsimple_vars(self,kind='shallow'):
+#        if kind=='shallow':
+#            suffix=''
+#        else:
+#            suffix=kind
+#        filepaths = [self.path+"e5.diagnostic.{}{}.{}-{}.{}.{}.nc".format(varcode,suffix,self.years[0],self.years[-1],self._monthstr,self.name) for varcode in ("eb","eL","eLstar","tL","qL")]
+#        eb = xr.open_dataarray(filepaths[0])#.mean('level')
+#        eL = xr.open_dataarray(filepaths[1])#.mean('level')
+#        eLstar = xr.open_dataarray(filepaths[2])#.mean('level')
+#        tL = xr.open_dataarray(filepaths[3])
+#        qL = xr.open_dataarray(filepaths[4])
+#        self.vars['EB{}_DAILY'.format(suffix.upper())] = eb
+#        self.vars['EL{}_DAILY'.format(suffix.upper())] = eL
+#        self.vars['ELSTAR{}_DAILY'.format(suffix.upper())] = eLstar
+#        self.vars['TL{}_DAILY'.format(suffix.upper())] = tL
+#        self.vars['QL{}_DAILY'.format(suffix.upper())] = qL
+#        BLsimple = compute_BLsimple(eb,eL,eLstar,kind=kind)
+#        self.vars['BL{}SIMPLE_DAILY'.format(suffix.upper())] = BLsimple
+#        
+#    def set_daily_uLvL(self, extra_levels=[]):
+#        filepaths = [self.path+"e5.diagnostic.{}.{}-{}.{}.{}.nc".format(varcode,self.years[0],self.years[-1],self._monthstr,self.name) for varcode in ("uL","vL")]
+#        uL = xr.open_dataarray(filepaths[0])
+#        vL = xr.open_dataarray(filepaths[1])
+#        self.vars['UL_DAILY'] = uL
+#        self.vars['VL_DAILY'] = vL
+#        for suffix in extra_levels:
+#            filepaths = [self.path+"e5.diagnostic.{}.{}-{}.{}.{}.nc".format(varcode,self.years[0],self.years[-1],self._monthstr,self.name) for varcode in ("u"+suffix,"v"+suffix)]
+#            u = xr.open_dataarray(filepaths[0])
+#            v = xr.open_dataarray(filepaths[1])
+#            self.vars['U{}_DAILY'.format(suffix)] = u
+#            self.vars['V{}_DAILY'.format(suffix)] = v
         
     def set_spatialmean(self,varname,locname,mask,box=None):
         #mask = tilted_rect(BL,*self.box_tilted,reverse=False)
@@ -382,10 +406,10 @@ class MountainRangeCustom(MountainRange):
 
     def set_uperp_sfc(self):
         self.vars['VAR_100U_PERP_DAILY'] = crossslopeflow(self.vars['VAR_100U_DAILY'], self.vars['VAR_100V_DAILY'],self.angle)
-    def set_uperp_L(self,angle, extra_levels=[]):
-        self.vars['UL_PERP_DAILY'] = crossslopeflow(self.vars['UL_DAILY'], self.vars['VL_DAILY'],angle)
-        for suffix in extra_levels:
-            self.vars['U{}_PERP_DAILY'.format(suffix)] = crossslopeflow(self.vars['U{}_DAILY'.format(suffix)], self.vars['V{}_DAILY'.format(suffix)],angle)
+#    def set_uperp_L(self,angle, extra_levels=[]):
+#        self.vars['UL_PERP_DAILY'] = crossslopeflow(self.vars['UL_DAILY'], self.vars['VL_DAILY'],angle)
+#        for suffix in extra_levels:
+#            self.vars['U{}_PERP_DAILY'.format(suffix)] = crossslopeflow(self.vars['U{}_DAILY'.format(suffix)], self.vars['V{}_DAILY'.format(suffix)],angle)
     def set_viwvperp_sfc(self):
         self.vars['VIWV_PERP_UPSTREAM_DAILY'] = crossslopeflow(self.vars['VIWVE_UPSTREAM_DAILY'], self.vars['VIWVN_UPSTREAM_DAILY'],self.angle)
                 
