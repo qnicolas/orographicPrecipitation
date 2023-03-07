@@ -12,7 +12,7 @@ p = os.path.abspath('../..')
 if p not in sys.path:
     sys.path.append(p)
 
-from orographicPrecipitation.precip_model_functions import qsat
+from tools.generalTools import qsat
 from orographicPrecipitation.precip_extremes_scaling import *
 
 import warnings

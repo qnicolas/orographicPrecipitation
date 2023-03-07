@@ -15,6 +15,7 @@ if p not in sys.path:
     sys.path.append(p)
 from orographicPrecipitation.precip_extremes_scaling import scaling
 from orographicPrecipitation.betts_miller import sbm
+from orographicPrecipitation.tools.generalTools import humidsat,qsat
 
 # ==================================================================
 # DISCRETIZATION PARAMETERS
@@ -426,45 +427,6 @@ def blqe_w(ps,ub,vb,temp_2m,temp,q,gz,lonlat):
 # ==================================================================
 # OMEGA700*qs(surface) PRECIPITATION MODEL, APPLIED TO ERA5 DATA
 # ==================================================================
-
-def humidsat(t,p):
-    """computes saturation vapor pressure (esat), saturation specific humidity (qsat),
-    and saturation mixing ratio (rsat) given inputs temperature (t) in K and
-    pressure (p) in hPa.
-    
-    these are all computed using the modified Tetens-like formulae given by
-    Buck (1981, J. Appl. Meteorol.)
-    for vapor pressure over liquid water at temperatures over 0 C, and for
-    vapor pressure over ice at temperatures below -23 C, and a quadratic
-    polynomial interpolation for intermediate temperatures."""
-    
-    tc=t-273.16
-    tice=-23
-    t0=0
-    Rd=287.04
-    Rv=461.5
-    epsilon=Rd/Rv
-
-
-    # first compute saturation vapor pressure over water
-    ewat=(1.0007+(3.46e-6*p))*6.1121*np.exp(17.502*tc/(240.97+tc))
-    eice=(1.0003+(4.18e-6*p))*6.1115*np.exp(22.452*tc/(272.55+tc))
-    #alternatively don't use enhancement factor for non-ideal gas correction
-    #ewat=6.1121*exp(17.502*tc/(240.97+tc));
-    #eice=6.1115*exp(22.452*tc/(272.55+tc));
-    eint=eice+(ewat-eice)*((tc-tice)/(t0-tice))*((tc-tice)/(t0-tice))
-
-    esat=(tc<tice)*eice + (tc>t0)*ewat + (tc>tice)*(tc<t0)*eint
-
-    #now convert vapor pressure to specific humidity and mixing ratio
-    rsat=epsilon*esat/(p-esat);
-    qsat=epsilon*esat/(p-esat*(1-epsilon));
-    
-    return esat,qsat,rsat
-
-def qsat(t,p):
-    _,q,_=humidsat(t,p)
-    return q
 
 def qsat_surface(ds,lonlat):
     if type(ds)!=list:

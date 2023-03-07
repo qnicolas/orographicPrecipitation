@@ -12,33 +12,9 @@ import sys
 p = os.path.abspath('/global/homes/q/qnicolas/')
 if p not in sys.path:
     sys.path.append(p)
-from tools.e5tools import *
+from tools.generalTools import *
 import metpy.calc as mpcalc
 from metpy.units import units
-
-def timesel(times,dayslist):
-    return [d in dayslist for d in pd.to_datetime(np.array(times)).strftime("%Y%m%d")]
-
-def crossslope_avg(var,center=0.5,halfwidth=0.25):
-    m=len(var.y)
-    return var.isel(y=slice(int(np.floor(m*(center-halfwidth))),int(np.ceil(m*(center+halfwidth))))).mean('y')
-
-def sel_box(var,box,lon='longitude',lat='latitude'):
-    return var.sel({lon:slice(box[0],box[1]),lat:slice(box[3],box[2])})
-
-def sel_months(ds,months):
-    try: 
-        return ds.sel(month = np.in1d( ds['month'], months))
-    except KeyError:
-        return ds.sel(time = np.in1d( ds['time.month'], months))
-
-
-def sel_box_months(var,box,months,lon='longitude',lat='latitude'):
-    window = sel_box(var,box,lon,lat)
-    if "month" in var.dims:
-        window=sel_months(window,months).mean('month')
-    return window
-
 
 def rotate_var(var,angle,mountaintop=0,two_dim=True,**rotate_args):
     dx = 2.*np.pi*6400/360*(var.longitude[1]-var.longitude[0])# approximate everything as at the equator
@@ -58,9 +34,11 @@ def rotate_var(var,angle,mountaintop=0,two_dim=True,**rotate_args):
         if "longitude" in coords: 
             del coords['longitude']
         return xr.DataArray(var_rot_ar,coords={'x':x[:var_rot_ar.shape[-1]],'y':y,**coords},dims=[*var.dims[:-2],'y','x'])
+    
+def crossslope_avg(var,center=0.5,halfwidth=0.25):
+    m=len(var.y)
+    return var.isel(y=slice(int(np.floor(m*(center-halfwidth))),int(np.ceil(m*(center+halfwidth))))).mean('y')
 
-def crossslopeflow(u,v,angle):
-    return (u*np.sin(angle*np.pi/180)+v*np.cos(angle*np.pi/180))
 
 class MountainRange :
     def __init__(self, name, box, Lname, angle, months, mountaintop, path = '/global/cscratch1/sd/qnicolas/regionsDataBig/'):
@@ -118,12 +96,7 @@ class MountainRange :
         self.vars['U_PERP'] = crossslopeflow(self.vars['U'], self.vars['V'],self.angle)
         self.vars_rot['U_PERP'] = crossslopeflow(self.vars_rot['U'], self.vars_rot['V'],self.angle)
         
-def compute_N(T,pfactor,pname='pressure'):
-    """T in K, p in Pa and N in s"""
-    g = 9.81; R=287.
-    rho = pfactor*T[pname]/R/T
-    theta = T*(pfactor*T[pname]/1e5)**(-0.287)
-    return np.sqrt(-rho*g*g/theta*theta.differentiate(pname)/pfactor)
+
 
         
 def plot_xz(ax,region,varname,pert=False,fact=1,center=0.5,halfwidth=0.25,**plot_kwargs):
@@ -173,147 +146,8 @@ def topography_pr_wind_plot(ax,box,z,pr,u,v,prlevs=None,windvect_density=0.1,**p
     ax.set_xlabel("")
     ax.set_ylabel("")
     ax.set_ylim((box[2],box[3]))
-    
 
-def tilted_rect(grid,x1,y1,x2,y2,width,reverse=False):
-    x = grid.longitude
-    y = grid.latitude
-    if reverse:
-        halfplane_para = (x-x1)*(y2-y1) - (x2-x1)*(y-y1) <=0
-    else:
-        halfplane_para = (x-x1)*(y2-y1) - (x2-x1)*(y-y1) >=0
-    sc_prod = (x-x1)*(x2-x1)+(y-y1)*(y2-y1)
-    halfplane_perp_up = sc_prod >= 0
-    halfplane_perp_dn = (x-x2)*(x1-x2)+(y-y2)*(y1-y2) >= 0
-    distance_across = np.sqrt(np.maximum(0.,(x-x1)**2+(y-y1)**2 - sc_prod**2/((x2-x1)**2+(y2-y1)**2)))
-    return (halfplane_para*halfplane_perp_up*halfplane_perp_dn*(distance_across<width)).transpose('latitude','longitude')
 
-def BL_plevs(t,q,lft_top_pressure,pname='level',fixed_thetaeb=False):
-    p = t**0*t[pname]
-    t_dew = mpcalc.dewpoint_from_specific_humidity(np.array(q), np.array(t)*units.K, np.array(p)*units.hPa)
-    zero_array = 0.*p
-    thetae = zero_array+np.array(mpcalc.equivalent_potential_temperature(np.array(p)*units.hPa,
-                                                                         np.array(t)*units.K,
-                                                                         t_dew
-                                                                        )/units.K)
-    thetaestar = zero_array+np.array(mpcalc.saturation_equivalent_potential_temperature(np.array(p)*units.hPa,
-                                                                                        np.array(t)*units.K
-                                                                                       )/units.K)
-    kappaL=3
-    g=9.81
-    wB = 0.52
-    wL = 1-wB
-    thetae0 = 340
-    if fixed_thetaeb:
-        thetaeB = 350
-    else:
-        thetaeB     = thetae    .where( p>=900                         ).mean(pname)
-    thetaeL     = thetae    .where((p< 900.) & (p>lft_top_pressure)).mean(pname)
-    thetaeLstar = thetaestar.where((p< 900.) & (p>lft_top_pressure)).mean(pname)
-    
-    capeL   = (thetaeB/thetaeLstar - 1)*thetae0
-    subsatL = (1 - thetaeL/thetaeLstar)*thetae0
-    BL = g/kappaL/thetae0*(wB*capeL-wL*subsatL)
-    return BL
-
-def thetae_perso(t,q,es,qs,pname='level'):
-    """t in K, t[pname] and es in hPa, q and qs in kg/kg. returns thetae in K"""
-    r  = q/(1-q)
-    rh = q/qs
-    # Magnus formula for dew point
-    b=18.678;c=257.14
-    gamma = np.log(rh)+b*(t-275.15)/(c+(t-273.15))
-    tdew = 273.15+c*gamma/(b-gamma)
-    tL = 1/(1/(tdew-56)+np.log(t/tdew)/800)+56
-    e = rh*es
-    
-    kappad=0.2854
-    thetaL = t*(1e3/(t[pname]-e))**kappad*(t/tL)**(0.28*r)
-    thetae = thetaL*np.exp((3036/tL-1.78)*r*(1+0.448*r))
-    return thetae
-
-def thetaestar_perso(t,es,qs,pname='level'):
-    """t in K, t[pname] and es in hPa, qs in kg/kg. returns thetae^* in K"""
-    rs=qs/(1-qs)
-    kappad=0.2854
-    thetaL = t*(1e3/(t[pname]-es))**kappad
-    thetae = thetaL*np.exp((3036/t-1.78)*rs*(1+0.448*rs))
-    return thetae
-
-from orographicPrecipitation.precip_model_functions import humidsat
-def BL_plevs_vectorized(t,q,lft_top_pressure,lft_bot_pressure,pname='level',fixed_thetaeb=False):
-    t = t.sel({pname:slice(lft_top_pressure,1100.)})
-    q = q.sel({pname:slice(lft_top_pressure,1100.)})
-    
-    es,qs,_=humidsat(t,t[pname])
-    thetae =     thetae_perso(t,q,es,qs,pname=pname)
-    thetaestar = thetaestar_perso(t,es,qs,pname=pname)  
-        
-    if fixed_thetaeb:
-        thetaeB = 350
-    else:
-        thetaeB = thetae    .sel({pname:slice(lft_bot_pressure,1100)            }).mean(pname)
-    thetaeL     = thetae    .sel({pname:slice(lft_top_pressure,lft_bot_pressure-1)}).mean(pname)
-    thetaeLstar = thetaestar.sel({pname:slice(lft_top_pressure,lft_bot_pressure-1)}).mean(pname)
-    return compute_BL(thetaeB,thetaeL,thetaeLstar)
-
-def BLsimple_plevs_vectorized(t,q,kind='shallow',pname='level',fixed_thetaeb=False):
-    if kind=='shallow':
-        eb = t.sel({pname:slice(900,1100.)}) + 2.5e6/1004*q.sel({pname:slice(900,1100.)})
-        tL = t.sel({pname:slice(700,899.)})
-        eL = tL + 2.5e6/1004*q.sel({pname:slice(700,899.)})
-        _,qsL,_=humidsat(tL,tL[pname])
-        eLstar = tL + 2.5e6/1004*qsL
-    elif kind=='deep':
-        eb = t.sel({pname:slice(850,1100.)}) + 2.5e6/1004*q.sel({pname:slice(850,1100.)})
-        tL = t.sel({pname:slice(500,849.)})
-        eL = tL + 2.5e6/1004*q.sel({pname:slice(500,849.)})
-        _,qsL,_=humidsat(tL,tL[pname])
-        eLstar = tL + 2.5e6/1004*qsL
-    return compute_BLsimple(eb,eL,eLstar,kind='shallow')
-
-###################### SECOND PART ########################
-
-def compute_BL(thetaeB,thetaeL,thetaeLstar,wB=0.52):
-    g=9.81
-    wL = 1-wB
-    thetae0 = 340
-    capeL   = (thetaeB/thetaeLstar - 1)*thetae0
-    subsatL = (1 - thetaeL/thetaeLstar)*thetae0
-    BL = g/thetae0*(wB*capeL-wL*subsatL) # Did not include the KappaL term to conform with AAN2020
-    return BL
-
-def compute_BLsimple(eb,eL,eLstar,kind='shallow'):
-    kappaL=3
-    g=9.81
-    wB = 0.52
-    wL = 1-wB
-    if kind=='shallow':
-        Pib = 0.985
-        PiL = 0.938
-    elif kind=='deep':
-        Pib = 0.97
-        PiL = 0.88
-    elif kind=='semi':
-        Pib = 0.985
-        PiL = 0.91
-    BLsimple = g/eLstar*PiL*(wB*eb/Pib+(wL*eL-eLstar)/PiL)
-    return BLsimple
-
-def tilted_rect_distance(grid,x1,y1,x2,y2,distups1,distups2,reverse=False):
-    x = grid.longitude
-    y = grid.latitude
-    scalarprod_para = (x-x1)*(y2-y1) - (x2-x1)*(y-y1)
-    scalarprod_perp_up = (x-x1)*(x2-x1)+(y-y1)*(y2-y1)
-    scalarprod_perp_dn = (x-x2)*(x1-x2)+(y-y2)*(y1-y2)
-    if reverse:
-        halfplane_para = scalarprod_para <=0
-    else:
-        halfplane_para = scalarprod_para >=0
-    halfplane_perp_up = scalarprod_perp_up >= 0
-    halfplane_perp_dn = scalarprod_perp_dn >= 0
-    distance_across = np.sqrt((x-x1)**2+(y-y1)**2 - scalarprod_perp_up**2/((x2-x1)**2+(y2-y1)**2))*np.sign(scalarprod_para)
-    return (halfplane_perp_up*halfplane_perp_dn*(distance_across<distups1)*(distance_across>distups2)).transpose('latitude','longitude')
 
 
 class MountainRangeCustom(MountainRange):

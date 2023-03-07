@@ -8,7 +8,7 @@ matplotlib.rcParams.update({'font.size': 16})
 import os
 import sys
 sys.path.append(os.path.abspath('../..'))
-from orographicPrecipitation.wrfProcessing.wrf_hr_utils import *
+from tools.wrfHrTools import *
 
 movietype = 'tprime'#'isentropes'#
 
