@@ -8,13 +8,13 @@ matplotlib.rcParams.update({'font.size':15})
 import time
 import cartopy.crs as ccrs
 import cartopy
+
 import sys
 p = os.path.abspath('/global/homes/q/qnicolas/')
 if p not in sys.path:
     sys.path.append(p)
 from tools.generalTools import *
-import metpy.calc as mpcalc
-from metpy.units import units
+from tools.BLtools import *
 
 def rotate_var(var,angle,mountaintop=0,two_dim=True,**rotate_args):
     dx = 2.*np.pi*6400/360*(var.longitude[1]-var.longitude[0])# approximate everything as at the equator
