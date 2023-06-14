@@ -151,7 +151,7 @@ def topography_pr_wind_plot(ax,box,z,pr,u,v,prlevs=None,windvect_density=0.1,**p
 
 
 class MountainRangeCustom(MountainRange):
-    def __init__(self, name, box, Lname, angle, months, box_tilted, path= '/global/cscratch1/sd/qnicolas/regionsDataBig/'):
+    def __init__(self, name, box, Lname, angle, months, box_tilted, path= '/pscratch/sd/q/qnicolas/regionsDataBig/'):
         super().__init__(name, box, Lname, angle, months, 0.,path)
         self.box_tilted = box_tilted
         self.years = range(2001,2021)

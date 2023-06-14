@@ -29,10 +29,12 @@ def p_to_z_standard(p):
 
 def w_to_zeta(w,Uz):
     """From w on a x-z grid and U on a z-grid, return the linear streamline vertical displacement zeta
-    If U is a scalar, assume it's constant through the column"""
+    If U is a scalar, assume it's constant through the column
+    zeta in m
+    """
     if not hasattr(Uz, "__len__"): #check if Uz is a scalar
         Uz = Uz*np.ones(len(w.altitude))
-    return xr.DataArray(cumtrapz(w,w.distance_from_mtn,axis=0,initial=0)/Uz[None,:],
+    return xr.DataArray(cumtrapz(w,w.distance_from_mtn*1000,axis=0,initial=0)/Uz[None,:],
                         coords=w.coords,
                         dims=w.dims
                        )
@@ -42,8 +44,8 @@ def w_to_Tprime(w,Uz,Nz):
     if not hasattr(Uz, "__len__"): #check if Uz is a scalar
         Uz = Uz*np.ones(len(w.altitude))
         
-    cp = 1004.;g=9.81
-    ds0dz = cp*300/g*Nz**2
+    g=9.81
+    ds0dz = 300/g*Nz**2
     ds0dz = ds0dz*w.altitude**0 #convert to xarray for broadcasting
     
     return  - ds0dz * w_to_zeta(w,Uz)
@@ -54,7 +56,7 @@ def w_to_qprime(w,Uz,dq0dz = 8.1/2.5e3):
         Uz = Uz*np.ones(len(w.altitude))
         
     dq0dz = dq0dz*w.altitude**0 #convert to xarray for broadcasting
-    return  dq0dz * w_to_zeta(w,Uz)
+    return  -dq0dz * w_to_zeta(w,Uz)
 
 
 ###################################################################################################
@@ -153,3 +155,57 @@ def linear_w_generalized(xx,hx,z,Uz,Nz):
     w=xr.DataArray(np.real(np.fft.ifft(w_hat,axis=0)),coords={'distance_from_mtn':xx/1000,'altitude':z/1000},dims=['distance_from_mtn','altitude']).assign_coords({'pressure':('altitude',z_to_p_standard(z))})
     return w
 
+########################################################################################################################
+####################### LINEAR MODEL, ARBITRARY U(z) AND N(z) PROFILES, W/ DIABATIC HEATING ############################
+########################################################################################################################
+
+def gw_mode_forced(z,lz2,k,hhatk,U0,qhatk):
+    """Computes one wave mode by solving the linear wave equation:
+    d2/dz2(w_hat) + (l(z)^2-k^2)w_hat = q_hat, subject to BCs
+    w_hat(k,z=0) = ikU(z=0)h_hat(k) 
+    & d w_hat(k,ztop) = i m(ztop) w_hat(k,ztop), where m(ztop) is defined to satisfy a radiation BC or an evanescent BC at the top
+    """
+    n = len(z)
+    dz = z[1]-z[0]
+    
+    sgnk = np.sign(k)
+    if k==0:
+        sgnk=1
+    if lz2[-1] < k**2:
+        mtop = 1j*np.sqrt(k**2-lz2[-1])
+    else:
+        mtop = sgnk*np.sqrt(lz2[-1]-k**2)
+    
+    D2 = second_derivative_matrix(n,1) #Matrix of second differentiation
+    A = D2 + dz**2*np.diag(lz2-k**2)
+    A = A.astype('complex')
+    
+    A[0]   = np.zeros(n)
+    A[0,0] = 1
+    A[-1]  = np.zeros(n)
+    #A[-1,-1] = 1;A[-1,-2] = -1
+    A[-1,-3:] = np.array([1,-4,3])/2
+    A[-1,-1] -= dz * 1j* mtop
+    
+    b = 1j*np.zeros(n)
+    b[0] = 1j*k*U0*hhatk
+    b[1:-1]= dz**2 * qhatk[1:-1]
+    
+    return np.linalg.solve(A,b)
+    A = csc_matrix(A)
+    return spsolve(A,b)
+def linear_w_generalized_forced(xx,hx,z,Uz,Nz,qxz):
+    "z must be evenly spaced"
+    kk=k_vector(len(xx),xx[1]-xx[0])
+    h_hat = np.fft.fft(hx)
+    lz2 = Nz**2/Uz**2 - 1/Uz * np.dot(second_derivative_matrix(len(z),z[1]-z[0]),Uz)
+    qhatz = np.fft.fft(qxz,axis=0)
+    
+    w_hat =np.zeros((len(kk),len(z)))*1j
+    for i,k in enumerate(kk):
+        if i%500==0:
+            print(i,end=' ')
+        w_hat[i] = gw_mode_forced(z,lz2,k,h_hat[i],Uz[0],qhatz[i,:]/Uz**2)
+        
+    w=xr.DataArray(np.real(np.fft.ifft(w_hat,axis=0)),coords={'distance_from_mtn':xx/1000,'altitude':z/1000},dims=['distance_from_mtn','altitude']).assign_coords({'pressure':('altitude',z_to_p_standard(z))})
+    return w
